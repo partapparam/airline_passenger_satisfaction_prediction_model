@@ -80,6 +80,9 @@ In second terminal, run:
 ### Build the Docker Image
 
 `docker build -t satisfaction .`
+
 `docker run -it -p 9696:9696 satisfaction:latest `
+
 Run in another terminal:
+
 `python predict_test.py`
