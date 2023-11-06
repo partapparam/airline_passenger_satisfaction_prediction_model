@@ -20,14 +20,13 @@ random_state=1
 output_file = 'xgb_model.bin'
 np.random.seed(1)
 
-xgb_params = {
+xgb_params_final = {
     'eta': 0.3, 
-    'max_depth': 1,
+    'max_depth': 3,
     'min_child_weight': 1,
-    
     'objective': 'binary:logistic',
+    'eval_metric': 'auc',
     'nthread': 8,
-    
     'seed': 1,
     'verbosity': 1,
 }
@@ -77,7 +76,6 @@ y_test = (df_test.satisfaction == 'satisfied').astype('int').values
 
 del df_train['satisfaction']
 del df_test['satisfaction']
-del categoricals['satisfaction']
 
 train_dicts = df_train.fillna(0).to_dict(orient='records')
 test_dicts = df_test.fillna(0).to_dict(orient='records')
@@ -88,36 +86,42 @@ features = list(dv.get_feature_names_out())
 
 # DMatrix
 dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=features)
-dval = xgb.DMatrix(X_test, label=y_test, feature_names=features)
+dtest = xgb.DMatrix(X_test, label=y_test, feature_names=features)
+
+test_dicts = df_test.fillna(0).to_dict(orient='records')
+X_test = dv.transform(test_dicts)
 
 # function to train the model
-def train(df_train, y_train, n_estimators, max_depth, min_samples_leaf, bootstrap, random_state):
-    
+def train(df_train, y_train, xgb_params):
+    train_dicts = df_train.fillna(0).to_dict(orient='records')
     dv = DictVectorizer(sparse=False)
-    train_dict = df_train.to_dict(orient='records')
-    X_train = dv.fit_transform(train_dict)
+    X_train = dv.fit_transform(train_dicts)
+    features = list(dv.get_feature_names_out())
+    # DMatrix
+    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=features)
 
-    rf_model = RandomForestClassifier(n_estimators=n_estimators,
-                                      max_depth=max_depth,
-                                      min_samples_leaf=min_samples_leaf,
-                                      bootstrap=bootstrap,
-                                      random_state=random_state)
-    rf_model.fit(X_train, y_train)
+    xgb_model = xgb.train(params=xgb_params,
+                    dtrain=dtrain,
+                    num_boost_round=100,
+                    verbose_eval=5)
     
-    return dv, rf_model
+    return dv, xgb_model
 
 # function to predict using the model and DictVectorizer
 def predict(df, dv, model):
-    dicts = df[categorical + numerical].to_dict(orient='records')
+    dicts = df[categoricals + numericals].to_dict(orient='records')
 
-    X = dv.transform(dicts)
-    y_pred = model.predict_proba(X)[:, 1]
+    X_test = dv.transform(dicts)
+    dtest = xgb.DMatrix(X_test, label=y_test, feature_names=features)
 
-    return y_pred
+    xgb_pred = model.predict(dtest)
+    xgb_satisfied = (xgb_pred >= 0.5)
+
+    return xgb_satisfied
 
 
-dv, rf_model = train(df_train, y_train, n_estimators, max_depth, min_samples_leaf, bootstrap, random_state)
+dv, xgb_model = train(df_train, y_train, xgb_params_final)
 
 # saving the DictVectorizer and RandomForest model to the same file
 with open(output_file, 'wb') as f_out: 
-    pickle.dump((dv, rf_model), f_out)
+    pickle.dump((dv, xgb_model), f_out)
